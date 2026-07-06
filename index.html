@@ -180,6 +180,7 @@ body.spooky #menu h2{color:#ff9a40;text-shadow:0 0 12px rgba(255,140,40,.6)}
 
   <div class="gpanels" id="tab-style">
     <div class="panel"><div class="label">RIDE</div><div class="rowsel" id="carRow"></div></div>
+    <div class="panel"><div class="label">DRIVER</div><div class="rowsel" id="driverRow"></div></div>
     <div class="panel"><div class="label">PAINT — TOP</div><div class="rowsel" id="paintTopRow"></div></div>
     <div class="panel"><div class="label">PAINT — BOTTOM</div><div class="rowsel" id="paintBottomRow"></div></div>
     <div class="panel"><div class="label">TRIM</div><div class="rowsel" id="trimRow"></div></div>
@@ -267,6 +268,7 @@ body.spooky #menu h2{color:#ff9a40;text-shadow:0 0 12px rgba(255,140,40,.6)}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 /* =====================================================================
    SINISTER CLUB: DUB'D EDITION — v3 "VICE CITY NIGHTS"
@@ -290,8 +292,8 @@ const ROADS = [
   { name:'Collins Ave',    type:'side', w:11, pts:[[198,-215],[170,-196],[166,-60],[168,60],[171,196],[198,215]] },
   { name:'MacArthur Cswy', type:'main', w:18, pts:[[-180,0],[-60,-6],[40,0],[120,8],[199,4]] },
   { name:'Main St',        type:'main', w:14, pts:[[-206,-140],[-100,-140],[-96,-20],[-98,130]] },
-  { name:'2nd Ave',        type:'side', w:10, pts:[[-172,-196],[-170,-44],[-118,-40]] },
-  { name:'3rd St',         type:'side', w:10, pts:[[-60,-162],[-60,-20],[-64,92]] },
+  { name:'2nd Ave',        type:'side', w:10, pts:[[-172,-196],[-170,-44],[-96,-38]] },
+  { name:'3rd St',         type:'side', w:10, pts:[[-44,-157],[-60,-130],[-60,-20],[-60,82]] },
   { name:'Biscayne Diag',  type:'main', w:15, pts:[[-96,58],[-20,108],[70,150],[152,194],[178,206]] },
   { name:'Marina Loop',    type:'side', w:12, loop:true, pts:[[-40,-160],[20,-192],[82,-186],[122,-150],[122,-92],[80,-60],[18,-70],[-30,-112]] },
   { name:'Marina Link',    type:'side', w:10, pts:[[122,-148],[199,-142]] },
@@ -448,11 +450,28 @@ const RIDES = [
   { name:'SLAMMED', f:0.62 }, { name:'STOCK', f:1.0 }, { name:'LIFT KIT', f:1.5 }
 ];
 const HORNS = ['BEEP', 'DIXIE', 'LA CUCA', 'DOOM ORGAN'];
+// characters — same rig + same size for everyone, so they all FIT in the cars
+const PED_STYLES = [
+  { name:'GOTH',   hoodie:0x16161c, pants:0x27303e, skin:0xb98a63 },
+  { name:'STREET', hoodie:0x7a2030, pants:0x1a1a20, skin:0x8a5a3a },
+  { name:'BEACH',  hoodie:0x30b0c8, pants:0xd8c8a0, skin:0xd8a878 },
+  { name:'RACER',  hoodie:0xd4a017, pants:0x14141a, skin:0xc09070 },
+  { name:'NEON',   hoodie:0x9040ff, pants:0x0c0c10, skin:0xb98a63 }
+];
+const RAZ_STYLE = { name:'RAZ', hoodie:0x0a0a0c, pants:0x1a1a20, skin:0xb98a63, cap:0xc40018 };
 // everything about YOUR car lives here — one object, easy to save/sync later
 const custom = {
   car:0, paintTop:7, paintBottom:0, rimStyle:0, rimColor:0, spoiler:1, neon:0,
-  tint:1, hl:0, exhaust:2, roof:0, ride:1, airride:0, horn:0, trim:6, plate:'SINISTER'
+  tint:1, hl:0, exhaust:2, roof:0, ride:1, airride:0, horn:0, trim:6, plate:'SINISTER',
+  driver:0
 };
+// pedestrians
+let peds = [];
+const PED_COUNT = 20;
+let razHit = false;
+// world hooks for the asset pipeline
+let treeSpots = [];
+let buildingMeshes = [];
 // ---------------- ECONOMY / PROGRESSION ----------------
 let cash = 500;
 const upgrades = { engine:0, nitro:0, grip:0 };
@@ -839,6 +858,7 @@ function buildGarageUI() {
     d.onclick = () => { if (locked) { showGarageMsg('BEAT THE BOSS RACE TO UNLOCK'); return; } custom.car = i; applyCustom(); };
     carRow.appendChild(d);
   });
+  fillPillRow('driverRow', PED_STYLES.map(s => s.name), custom.driver, i => { custom.driver = i; applyCustom(); });
   fillSwatchRow('paintTopRow', PAINTS, p => p.hex, custom.paintTop, i => { custom.paintTop = i; applyCustom(); });
   fillSwatchRow('paintBottomRow', PAINTS, p => p.hex, custom.paintBottom, i => { custom.paintBottom = i; applyCustom(); });
   fillSwatchRow('trimRow', PAINTS, p => p.hex, custom.trim, i => { custom.trim = i; applyCustom(); });
@@ -898,7 +918,7 @@ function effSpec() {
 
 // ---------------- SAVE CODES (works everywhere, no browser storage needed) ----------------
 function makeSaveCode() {
-  const data = { v: 2, custom, cash, upgrades, bestTimes, spooky, wins, phantom: phantomUnlocked };
+  const data = { v: 2, custom, cash, upgrades, bestTimes, spooky, wins, phantom: phantomUnlocked, razHit };
   return btoa(unescape(encodeURIComponent(JSON.stringify(data))));
 }
 function loadSaveCode(str) {
@@ -911,6 +931,7 @@ function loadSaveCode(str) {
     bestTimes = d.bestTimes || {};
     wins = d.wins || {};
     phantomUnlocked = !!d.phantom;
+    razHit = !!d.razHit;
     if (!phantomUnlocked && custom.car === 3) custom.car = 0;
     setSpooky(!!d.spooky);
     applyCustom();
@@ -1195,6 +1216,7 @@ function buildWorld() {
     b.scale.set(w, h, d);
     b.position.set(px, h/2, pz);
     scene.add(b);
+    buildingMeshes.push({ mesh: b, x: px, z: pz, w, d, h });
     buildings.push({ x1: px - w/2, x2: px + w/2, z1: pz - d/2, z2: pz + d/2, h });
   }
   const ZONES = [
@@ -1272,14 +1294,19 @@ function buildWorld() {
 
   // ---- TREELINE: walls off the view past the city (east stays open ocean) ----
   {
-    const treeSpots = [];
+    treeSpots = [];
     const jit = () => (Math.random() - 0.5) * 6;
+    const tryAdd = (x, z) => {
+      // never inside a road corridor (the ring runs through these bands)
+      for (const r of ROADS) if (distToRoad(x, z, r) < r.w/2 + 5) return;
+      treeSpots.push([x, z]);
+    };
     for (let x = -264; x <= 238; x += 8) {          // south + north bands
-      treeSpots.push([x + jit(), -258 + jit()], [x + jit(), -250 + jit()]);
-      treeSpots.push([x + jit(),  258 + jit()], [x + jit(),  250 + jit()]);
+      tryAdd(x + jit(), -258 + jit()); tryAdd(x + jit(), -250 + jit());
+      tryAdd(x + jit(),  258 + jit()); tryAdd(x + jit(),  250 + jit());
     }
     for (let z = -246; z <= 246; z += 8) {          // west band
-      treeSpots.push([-258 + jit(), z + jit()], [-250 + jit(), z + jit()]);
+      tryAdd(-258 + jit(), z + jit()); tryAdd(-250 + jit(), z + jit());
     }
     const trunkGeo = new THREE.CylinderGeometry(0.45, 0.75, 1, 5);
     const canopyGeo = new THREE.ConeGeometry(1, 1, 6);
@@ -1306,6 +1333,7 @@ function buildWorld() {
     canopyInst.instanceMatrix.needsUpdate = true;
     scene.add(trunkInst);
     scene.add(canopyInst);
+    window.__treeInstances = [trunkInst, canopyInst];
   }
 
   clock = new THREE.Clock();
@@ -1500,6 +1528,7 @@ function enterGarage() {
   raceState = null;
   buildGates(null);
   setPoliceVisible(false);
+  setPedsVisible(false);
   totaledT = 0;
   pendingRace = null;
   document.getElementById('racePrompt').style.display = 'none';
@@ -1529,6 +1558,7 @@ function driveOut() {
   player.nitro = 1;
   spawnTraffic();
   spawnPolice();
+  spawnPeds();
   resetProps();
   camShake = 0; hydroT = -1;
   camPos.copy(player.group.position).add(new THREE.Vector3(-10, 7, 0));
@@ -1548,20 +1578,32 @@ function updateGarageCamera(dt) {
 }
 
 // ---------------- THE DRIVER (on foot) ----------------
-function buildDriver() {
+// ---------------- THE HUMAN RIG (drivers + pedestrians, one size fits all cars) ----------------
+function buildHuman(style) {
   const group = new THREE.Group();
-  const hoodie = new THREE.MeshStandardMaterial({ color: 0x16161c, roughness: 0.9 });
-  const jeans = new THREE.MeshStandardMaterial({ color: 0x27303e, roughness: 0.9 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0xb98a63, roughness: 0.8 });
+  const hoodie = new THREE.MeshStandardMaterial({ color: style.hoodie, roughness: 0.9 });
+  const jeans = new THREE.MeshStandardMaterial({ color: style.pants, roughness: 0.9 });
+  const skin = new THREE.MeshStandardMaterial({ color: style.skin, roughness: 0.8 });
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.62, 0.32), hoodie);
   torso.position.y = 1.06;
   group.add(torso);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), skin);
   head.position.y = 1.56;
   group.add(head);
-  const hood = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8, 0, Math.PI*2, 0, Math.PI/2), hoodie);
-  hood.position.y = 1.58;
-  group.add(hood);
+  if (style.cap) {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 8, 0, Math.PI*2, 0, Math.PI/2),
+      new THREE.MeshStandardMaterial({ color: style.cap, roughness: 0.7 }));
+    cap.position.y = 1.6;
+    group.add(cap);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.03, 0.16),
+      new THREE.MeshStandardMaterial({ color: style.cap, roughness: 0.7 }));
+    brim.position.set(0, 1.6, 0.2);
+    group.add(brim);
+  } else {
+    const hood = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8, 0, Math.PI*2, 0, Math.PI/2), hoodie);
+    hood.position.y = 1.58;
+    group.add(hood);
+  }
   function limb(mat, w, len, x, y) {
     const pivot = new THREE.Group();
     pivot.position.set(x, y, 0);
@@ -1577,12 +1619,21 @@ function buildDriver() {
   const armR = limb(hoodie, 0.13, 0.55, 0.36, 1.3);
   return { group, legL, legR, armL, armR, walkT: 0, heading: 0 };
 }
+function buildDriver() {
+  const h = buildHuman(PED_STYLES[custom.driver] || PED_STYLES[0]);
+  h.styleIdx = custom.driver;
+  return h;
+}
 function toggleFoot() {
   if (!onFoot) {
     if (player.vel.length() > 5) { showMsg('STOP THE CAR FIRST', 900); return; }
     if (player.air) return;
     onFoot = true;
-    if (!driver) { driver = buildDriver(); scene.add(driver.group); }
+    if (!driver || driver.styleIdx !== custom.driver) {
+      if (driver) scene.remove(driver.group);
+      driver = buildDriver();
+      scene.add(driver.group);
+    }
     driver.group.visible = true;
     const h = player.heading;
     // step out the driver side
@@ -1682,6 +1733,101 @@ function updateFootCamera(dt) {
   camera.lookAt(look);
   camera.fov += (66 - camera.fov) * Math.min(1, dt * 4);
   camera.updateProjectionMatrix();
+}
+
+// ---------------- FREE ASSET PIPELINE ----------------
+// The game runs 100% procedural on its own. Two ways to feed it real models:
+//   A) CDN (zero downloads): manifest entries can be FULL URLs, e.g. jsDelivr
+//      serving any GitHub-hosted CC0 pack (KayKit, Quaternius mirrors, ...)
+//   B) Local: drop .glb/.gltf files in an "assets" folder next to this file
+//      (serve over http — `npx serve` — file:// blocks model fetches)
+// assets/manifest.json format:
+//   {
+//     "cars": { "tuner": "<file-or-url>", "muscle": "...", "donk": "...", "phantom": "..." },
+//     "traffic": ["<file-or-url>", ...],      // civilian cars, randomly assigned
+//     "police": "<file-or-url>",
+//     "buildings": ["...", ...],
+//     "trees": ["...", ...]
+//   }
+// Loaded car models: nodes named *wheel* are hidden automatically so OUR
+// customizable rims mount on every model. Anything missing = procedural fallback.
+const loadedAssets = { buildings: [], trees: [], traffic: [], cars: {}, police: null };
+function assetUrl(f) { return /^https?:\/\//i.test(f) ? f : 'assets/' + f; }
+function fitClone(src, targetW, targetH, targetD, groundY) {
+  const inst = src.clone(true);
+  const box = new THREE.Box3().setFromObject(inst);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  if (size.x < 0.001 || size.y < 0.001 || size.z < 0.001) return inst;
+  const s = Math.min(targetW / size.x, targetH / size.y, targetD / size.z);
+  inst.scale.setScalar(s);
+  const box2 = new THREE.Box3().setFromObject(inst);
+  const c = new THREE.Vector3();
+  box2.getCenter(c);
+  inst.position.x -= c.x;
+  inst.position.z -= c.z;
+  inst.position.y -= box2.min.y - (groundY || 0);
+  return inst;
+}
+function applyLoadedAssets() {
+  // buildings: hide the boxes, place fitted models on the same footprints (AABBs stay = same collisions)
+  if (loadedAssets.buildings.length) {
+    buildingMeshes.forEach((bm, i) => {
+      const src = loadedAssets.buildings[i % loadedAssets.buildings.length];
+      const inst = fitClone(src, bm.w, bm.h, bm.d, 0);
+      inst.position.x += bm.x;
+      inst.position.z += bm.z;
+      scene.add(inst);
+      bm.mesh.visible = false;
+    });
+  }
+  // trees: swap the instanced conifers for model clones on the same spots
+  if (loadedAssets.trees.length && treeSpots.length) {
+    treeSpots.forEach((ts, i) => {
+      const src = loadedAssets.trees[i % loadedAssets.trees.length];
+      const h = 13 + ((i * 37) % 9);
+      const inst = fitClone(src, 9, h, 9, 0);
+      inst.position.x += ts[0];
+      inst.position.z += ts[1];
+      inst.rotation.y = (i * 2.4) % (Math.PI * 2);
+      scene.add(inst);
+    });
+    if (window.__treeInstances) window.__treeInstances.forEach(m => { m.visible = false; });
+  }
+  // vehicles pick up models on respawn — refresh the world if we're in it
+  if (mode === 'cruise') { spawnTraffic(); spawnPolice(); }
+  if (mode === 'garage') spawnPlayer(GARAGE.x, GARAGE.z, Math.PI / 2);
+  showMsg('FREE ASSETS LOADED', 1600);
+}
+function initAssets() {
+  if (typeof THREE === 'undefined' || !THREE.GLTFLoader || typeof fetch === 'undefined') return;
+  fetch('assets/manifest.json')
+    .then(r => (r.ok ? r.json() : null))
+    .then(man => {
+      if (!man) return;
+      const loader = new THREE.GLTFLoader();
+      const jobs = [];
+      ['buildings', 'trees', 'traffic'].forEach(k => (man[k] || []).forEach(f => {
+        jobs.push(new Promise(res => loader.load(assetUrl(f),
+          g => { loadedAssets[k].push(g.scene); res(); }, undefined, () => res())));
+      }));
+      Object.entries(man.cars || {}).forEach(([id, f]) => {
+        jobs.push(new Promise(res => loader.load(assetUrl(f),
+          g => { loadedAssets.cars[id] = g.scene; res(); }, undefined, () => res())));
+      });
+      if (man.police) {
+        jobs.push(new Promise(res => loader.load(assetUrl(man.police),
+          g => { loadedAssets.police = g.scene; res(); }, undefined, () => res())));
+      }
+      Promise.all(jobs).then(() => {
+        if (loadedAssets.buildings.length || loadedAssets.trees.length ||
+            loadedAssets.traffic.length || loadedAssets.police ||
+            Object.keys(loadedAssets.cars).length) {
+          applyLoadedAssets();
+        }
+      });
+    })
+    .catch(() => {});   // no assets = pure procedural, no drama
 }
 
 // ---------------- CAR FACTORY ----------------
@@ -1867,6 +2013,26 @@ function buildCar(spec, opts, isTraffic) {
     bodyGroup.add(tl);
   });
   group.add(bodyGroup);
+
+  // free-asset body swap: model replaces the boxes; wheels stay OURS so every
+  // rim style still fits every car (model wheel nodes are hidden automatically)
+  const modelSrc = opts.model
+    || (isTraffic
+        ? (loadedAssets.traffic.length ? loadedAssets.traffic[Math.floor(Math.random() * loadedAssets.traffic.length)] : null)
+        : loadedAssets.cars[spec.id]);
+  if (modelSrc) {
+    bodyGroup.children.forEach(ch => { ch.visible = false; });
+    const inst = fitClone(modelSrc, spec.bodyW * 1.2, spec.bodyH + spec.cabH + spec.ride + 0.4, spec.bodyL * 1.06, spec.ride * 0.3);
+    inst.traverse(o => {
+      if (/wheel/i.test(o.name || '')) o.visible = false;   // our rims take over
+      if (o.isMesh && o.material && o.material.color && !isTraffic) {
+        o.material = o.material.clone();
+        o.material.color.lerp(new THREE.Color(opts.paintBottom), 0.45);   // candy tint
+      }
+    });
+    bodyGroup.add(inst);
+    inst.visible = true;
+  }
 
   const wheels = [];
   const tireGeo = new THREE.CylinderGeometry(spec.wheelR, spec.wheelR, 0.4, 14);
@@ -2141,7 +2307,7 @@ function updateTraffic(dt) {
 // ---------------- POLICE / HEAT ----------------
 function buildPoliceCar() {
   const spec = CIV_SPECS[0];
-  const parts = buildCar(spec, { paintTop: 0x0c0c12, paintBottom: 0xe4e6ea, rimStyle: 3, rimColor: RIMS[2], spoiler: 0, neon: 0 }, true);
+  const parts = buildCar(spec, { paintTop: 0x0c0c12, paintBottom: 0xe4e6ea, rimStyle: 3, rimColor: RIMS[2], spoiler: 0, neon: 0, model: loadedAssets.police }, true);
   const bar = new THREE.Group();
   const red = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.24), new THREE.MeshBasicMaterial({ color: 0xff2030 }));
   red.position.x = -0.22;
@@ -2307,7 +2473,161 @@ function updatePolice(dt) {
   updateSiren(minD);
 }
 
-// ---------------- RACE GATES ----------------
+// ---------------- PEDESTRIANS (with ragdolls, obviously) ----------------
+function pedSpot() {
+  for (let tries = 0; tries < 12; tries++) {
+    const r = ROADS[randomRoad()];
+    const pt = roadPoint(r, Math.random() * r.total);
+    const off = (r.w/2 + 2.4) * (Math.random() < 0.5 ? 1 : -1);
+    const x = pt.x + pt.tz * off, z = pt.z - pt.tx * off;
+    if (x < 200 && Math.abs(x) < 250 && Math.abs(z) < 250) return { x, z };
+  }
+  return { x: 0, z: 20 };
+}
+function spawnPeds() {
+  peds.forEach(pd => scene.remove(pd.group));
+  peds = [];
+  for (let n = 0; n <= PED_COUNT; n++) {
+    const isRaz = n === PED_COUNT;   // one Raz walks among us
+    const style = isRaz ? RAZ_STYLE : PED_STYLES[Math.floor(Math.random() * PED_STYLES.length)];
+    const rig = buildHuman(style);
+    const sp = pedSpot();
+    rig.group.position.set(sp.x, 0, sp.z);
+    scene.add(rig.group);
+    const tgt = pedSpot();
+    peds.push({
+      ...rig, raz: isRaz,
+      state: 'walk', t: 0, gt: 0, fleeT: 0, hits: 0,
+      vel: new THREE.Vector3(), vy: 0, angVel: 0,
+      tx: tgt.x, tz: tgt.z
+    });
+  }
+}
+function setPedsVisible(v) { peds.forEach(pd => { pd.group.visible = v; }); }
+function hitPed(pd) {
+  pd.hits++;
+  pd.state = 'ragdoll';
+  pd.t = 0;
+  pd.vel.copy(player.vel).multiplyScalar(0.8);
+  pd.vel.x += (Math.random()-0.5) * 3;
+  pd.vel.z += (Math.random()-0.5) * 3;
+  pd.vy = 4.5 + Math.random() * 3.5;
+  pd.angVel = (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 6);
+  thump();
+  camShake = Math.max(camShake, 0.12);
+  if (pd.raz && !razHit) {
+    razHit = true;
+    cash += 10000;
+    popText('YOU HIT RAZ!! +$10,000');
+    showMsg('🎉 YOU HIT RAZ!! 🎉', 2400);
+    sparks(pd.group.position);
+    camShake = 0.5;
+    ding(); setTimeout(ding, 140); setTimeout(ding, 280);
+  }
+  // witnesses
+  for (const c of police) {
+    if (c.group.visible && c.group.position.distanceTo(player.group.position) < 55) { raiseHeat(); break; }
+  }
+  if (pd.hits >= 25) {
+    // they have had ENOUGH — self-delete, a new soul wanders in elsewhere
+    sparks(pd.group.position);
+    const sp = pedSpot();
+    pd.group.position.set(sp.x, 0, sp.z);
+    pd.group.rotation.set(0, 0, 0);
+    pd.state = 'walk'; pd.hits = 0; pd.vel.set(0,0,0); pd.vy = 0;
+    const tgt = pedSpot();
+    pd.tx = tgt.x; pd.tz = tgt.z;
+  }
+}
+function updatePeds(dt) {
+  if (mode !== 'cruise' || !peds.length) return;
+  const pp = player.group.position;
+  const pSpeed = player.vel.length();
+  for (const pd of peds) {
+    if (!pd.group.visible) continue;
+    const g = pd.group;
+    const dx = g.position.x - pp.x, dz = g.position.z - pp.z;
+    const d = Math.hypot(dx, dz);
+
+    if (pd.state === 'walk' || pd.state === 'flee') {
+      // SPLAT check
+      if (!onFoot && d < 2.1 && pp.y < 2 && pSpeed > 6) { hitPed(pd); continue; }
+      // survival instinct
+      if (!onFoot && pd.state === 'walk' && d < 15 && pSpeed > 9) { pd.state = 'flee'; pd.fleeT = 3; }
+      let mx, mz, spd;
+      if (pd.state === 'flee') {
+        pd.fleeT -= dt;
+        mx = dx / (d || 1); mz = dz / (d || 1);
+        spd = 7.5;
+        if (pd.fleeT <= 0 && d > 20) pd.state = 'walk';
+      } else {
+        const wx = pd.tx - g.position.x, wz = pd.tz - g.position.z;
+        const wl = Math.hypot(wx, wz);
+        if (wl < 3) { const t2 = pedSpot(); pd.tx = t2.x; pd.tz = t2.z; continue; }
+        mx = wx / wl; mz = wz / wl;
+        spd = 2.2;
+      }
+      pd.heading = Math.atan2(mx, mz);
+      g.position.x += mx * spd * dt;
+      g.position.z += mz * spd * dt;
+      g.position.y = sampleGroundY(g.position.x, g.position.z);
+      g.rotation.set(0, pd.heading, 0);
+      pd.walkT += dt * spd * 1.8;
+      const sw = Math.sin(pd.walkT) * (pd.state === 'flee' ? 0.9 : 0.5);
+      pd.legL.rotation.x = sw;  pd.legR.rotation.x = -sw;
+      pd.armL.rotation.x = pd.state === 'flee' ? -1.2 : -sw * 0.7;   // arms up when fleeing
+      pd.armR.rotation.x = pd.state === 'flee' ? -1.2 : sw * 0.7;
+      // don't walk through buildings
+      for (const bb of buildings) {
+        const px = g.position.x, pz = g.position.z, r = 0.3;
+        if (px > bb.x1 - r && px < bb.x2 + r && pz > bb.z1 - r && pz < bb.z2 + r) {
+          const t2 = pedSpot(); pd.tx = t2.x; pd.tz = t2.z;
+          const d1 = Math.min(px-(bb.x1-r), (bb.x2+r)-px), d2 = Math.min(pz-(bb.z1-r), (bb.z2+r)-pz);
+          if (d1 < d2) g.position.x = px - (bb.x1-r) < (bb.x2+r) - px ? bb.x1 - r : bb.x2 + r;
+          else g.position.z = pz - (bb.z1-r) < (bb.z2+r) - pz ? bb.z1 - r : bb.z2 + r;
+          break;
+        }
+      }
+    } else if (pd.state === 'ragdoll') {
+      pd.t += dt;
+      // still fair game while down — bowling for pedestrians
+      if (!onFoot && d < 2.4 && pp.y < 2 && pSpeed > 6) { hitPed(pd); continue; }
+      pd.vy -= 22 * dt;
+      g.position.x += pd.vel.x * dt;
+      g.position.z += pd.vel.z * dt;
+      g.position.y += pd.vy * dt;
+      const gY = sampleGroundY(g.position.x, g.position.z);
+      const airborne = g.position.y > gY + 0.35;
+      if (g.position.y < gY + 0.3 && pd.vy < 0) {
+        g.position.y = gY + 0.3;
+        if (Math.abs(pd.vy) > 5) pd.vy = -pd.vy * 0.35;
+        else pd.vy = 0;
+        pd.vel.multiplyScalar(0.72);
+      }
+      pd.vel.multiplyScalar(Math.max(0, 1 - 1.6 * dt));
+      g.rotation.y += pd.angVel * dt;
+      pd.angVel *= Math.max(0, 1 - 1.5 * dt);
+      // tumble to flat
+      g.rotation.x += (-1.45 - g.rotation.x) * Math.min(1, dt * (airborne ? 6 : 3));
+      // limbs flop
+      const fl = airborne ? 1.3 : Math.max(0, 1 - pd.t * 0.6);
+      pd.legL.rotation.x = Math.sin(pd.t * 17) * fl;
+      pd.legR.rotation.x = Math.sin(pd.t * 15 + 2) * fl;
+      pd.armL.rotation.x = Math.sin(pd.t * 19 + 1) * fl;
+      pd.armR.rotation.x = Math.sin(pd.t * 14 + 3) * fl;
+      if (pd.t > 15) { pd.state = 'getup'; pd.gt = 0; }
+    } else if (pd.state === 'getup') {
+      pd.gt += dt;
+      const k = Math.min(1, pd.gt / 0.9);
+      g.rotation.x = -1.45 * (1 - k);
+      g.position.y = sampleGroundY(g.position.x, g.position.z) + 0.3 * (1 - k);
+      pd.legL.rotation.x = pd.legR.rotation.x = 0;
+      pd.armL.rotation.x = pd.armR.rotation.x = 0;
+      if (k >= 1) { pd.state = 'flee'; pd.fleeT = 4; }
+    }
+  }
+}
+
 function buildGates(route) {
   gates.forEach(g => scene.remove(g.group));
   gates = [];
@@ -2847,9 +3167,11 @@ function startGame(newMode, si, ri) {
     raceState = null;
     if (!police.length) spawnPolice();
     setPoliceVisible(true);
+    if (!peds.length) spawnPeds();
+    setPedsVisible(true);
     showMsg('FREE CRUISE', 1400);
   }
-  if (mode === 'race') setPoliceVisible(false);
+  if (mode === 'race') { setPoliceVisible(false); setPedsVisible(false); }
   pendingRace = null;
   document.getElementById('racePrompt').style.display = 'none';
   spawnTraffic();
@@ -3365,6 +3687,7 @@ function animate() {
       updateTraffic(dt);
       updateRivals(dt);
       updatePolice(dt);
+      updatePeds(dt);
       updateRace(dt);
       updateMarkers(dt);
       updateParticles(dt);
@@ -3393,6 +3716,7 @@ buildWorld();
 initDriveFX();
 buildProps();
 buildMarkers();
+initAssets();
 spawnPlayer(0, -2, Math.PI/2);
 spawnTraffic();
 camPos.set(-140, 70, -140);
